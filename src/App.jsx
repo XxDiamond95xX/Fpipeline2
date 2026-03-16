@@ -957,16 +957,51 @@ export default function App() {
   const [tab, setTab] = useState("pipeline");
   const [downloading, setDownloading] = useState(false);
   const logsEndRef = useRef(null);
+  const wakeLockRef = useRef(null);
+  const [wakeLockActive, setWakeLockActive] = useState(false);
 
   useEffect(() => { logsEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
   const addLog = (msg, color = "#555") => setLogs(prev => [...prev, { msg, color, time: new Date().toLocaleTimeString() }]);
 
+  // 🔒 Wake Lock — empêche le téléphone de se verrouiller
+  const acquireWakeLock = async () => {
+    try {
+      if ("wakeLock" in navigator) {
+        wakeLockRef.current = await navigator.wakeLock.request("screen");
+        setWakeLockActive(true);
+        wakeLockRef.current.addEventListener("release", () => {
+          setWakeLockActive(false);
+          wakeLockRef.current = null;
+        });
+      }
+    } catch (e) { console.warn("Wake Lock indisponible:", e.message); }
+  };
+
+  const releaseWakeLock = () => {
+    if (wakeLockRef.current) { wakeLockRef.current.release(); wakeLockRef.current = null; }
+    setWakeLockActive(false);
+  };
+
+  // Réacquiert si onglet redevient visible (Android Chrome)
+  useEffect(() => {
+    const onVisible = async () => {
+      if (document.visibilityState === "visible" && !wakeLockRef.current) {
+        const isRunning = document.getElementById("pipeline-running-flag");
+        if (isRunning) await acquireWakeLock();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
+
   const runPipeline = async () => {
     if (!niche.trim() || !apiKey.trim()) return;
     setRunning(true); setAgentStatus({}); setAgentResults({}); setLogs([]); setTab("pipeline");
+    await acquireWakeLock();
     addLog("🚀 Démarrage — génération chapitre par chapitre...", "#fff");
     addLog(`📌 Niche : "${niche}"`, "#a78bfa");
     addLog("⏱ Temps estimé : 8 à 12 minutes (90+ pages de contenu réel)", "#3a3a5a");
+    addLog("🔒 Écran maintenu allumé automatiquement", "#34d399");
 
     let context = {};
 
@@ -1053,6 +1088,7 @@ Réponds en JSON: {"felicitations":"100 mots chaleureux et personnels","recapitu
     }
 
     addLog("\n🎉 Tout est prêt ! Télécharge ton dossier complet ci-dessous.", "#00ffd5");
+    releaseWakeLock();
     setRunning(false);
     setTab("deliverables");
   };
@@ -1102,6 +1138,12 @@ Réponds en JSON: {"felicitations":"100 mots chaleureux et personnels","recapitu
           <div>
             <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>EBOOK AGENT PIPELINE</h1>
             <div style={{ color: "#3a3a5a", fontSize: 11, marginTop: 3 }}>GPT-4o · Style humain · 90+ pages réelles · ZIP complet</div>
+            {wakeLockActive && (
+              <div style={{ color: "#34d399", fontSize: 10, marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#34d399", animation: "blink 1.5s infinite" }} />
+                Écran maintenu allumé — la génération ne sera pas interrompue
+              </div>
+            )}
           </div>
         </div>
 
