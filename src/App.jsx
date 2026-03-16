@@ -605,6 +605,152 @@ const EbookViewer = ({ data, plan, onClose }) => {
 
   const activeChapterData = chapters.find(c => `ch${c.numero}` === activeChapter);
 
+  const downloadPDF = () => {
+    const introData = data?.introduction;
+    const conclusionData = data?.conclusion;
+
+    const chapterHTML = chapters.map(ch => `
+      <div class="chapter">
+        <div class="chapter-label">CHAPITRE ${ch.numero}</div>
+        <h1 class="chapter-title">${ch.titre || ""}</h1>
+        ${ch.introduction_chapitre ? `<div class="intro-block"><p>${ch.introduction_chapitre}</p></div>` : ""}
+        ${(ch.sections || []).map(s => `
+          <h2 class="section-title">${s.titre_section || ""}</h2>
+          <p class="section-content">${(s.contenu || "").replace(/\n/g, "<br/>")}</p>
+        `).join("")}
+        ${ch.encadre_conseil ? `<div class="conseil-block"><div class="conseil-label">💡 CONSEIL D'EXPERT</div><p>${ch.encadre_conseil}</p></div>` : ""}
+        ${ch.erreurs_courantes && ch.erreurs_courantes.length ? `
+          <div class="erreurs-block">
+            <div class="erreurs-label">⚠️ ERREURS À ÉVITER</div>
+            ${ch.erreurs_courantes.map(e => `<div class="erreur-item">✗ ${e}</div>`).join("")}
+          </div>` : ""}
+        ${ch.exercice_pratique ? `
+          <div class="exercice-block">
+            <div class="exercice-label">🏋️ EXERCICE PRATIQUE</div>
+            <div class="exercice-titre">${ch.exercice_pratique.titre || ""}</div>
+            <div class="exercice-meta">⏱ ${ch.exercice_pratique.duree_estimee || ""} · 🎯 ${ch.exercice_pratique.objectif || ""}</div>
+            ${(ch.exercice_pratique.etapes || []).map((e, i) => `<div class="etape"><span class="etape-num">${i + 1}</span>${e}</div>`).join("")}
+            ${ch.exercice_pratique.resultat_attendu ? `<div class="resultat">✅ Résultat attendu : ${ch.exercice_pratique.resultat_attendu}</div>` : ""}
+          </div>` : ""}
+        ${ch.resume_chapitre ? `<div class="resume-block"><div class="resume-label">📌 POINTS CLÉS</div><p>${ch.resume_chapitre}</p></div>` : ""}
+        ${ch.transition ? `<div class="transition">${ch.transition}</div>` : ""}
+      </div>
+    `).join('<div class="page-break"></div>');
+
+    const html = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<title>${plan?.titre_principal || "Ebook"}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Inter', sans-serif; color: #1a1a2e; background: #fff; font-size: 14px; line-height: 1.8; }
+  .cover { background: linear-gradient(135deg, #0d0d2a 0%, #1a0d3a 50%, #0d1a2e 100%); color: white; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 60px 40px; }
+  .cover-label { font-size: 11px; letter-spacing: 3px; color: #a78bfa; margin-bottom: 24px; text-transform: uppercase; }
+  .cover-title { font-size: 42px; font-weight: 800; line-height: 1.2; margin-bottom: 20px; background: linear-gradient(135deg, #ffffff, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .cover-subtitle { font-size: 18px; color: #8888aa; margin-bottom: 40px; font-weight: 300; }
+  .cover-badge { background: rgba(0,255,213,0.1); border: 1px solid #00ffd5; border-radius: 50px; padding: 10px 24px; color: #00ffd5; font-size: 13px; font-weight: 600; }
+  .toc { padding: 60px 80px; }
+  .toc h2 { font-size: 28px; font-weight: 800; color: #0d0d2a; margin-bottom: 32px; padding-bottom: 12px; border-bottom: 3px solid #a78bfa; }
+  .toc-item { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid #f0f0f0; }
+  .toc-num { min-width: 36px; height: 36px; border-radius: 8px; background: linear-gradient(135deg, #a78bfa, #7c3aed); color: white; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; }
+  .toc-text { color: #2a2a4a; font-size: 15px; font-weight: 500; }
+  .chapter { padding: 60px 80px; }
+  .chapter-label { font-size: 11px; letter-spacing: 3px; color: #a78bfa; font-weight: 600; margin-bottom: 12px; text-transform: uppercase; }
+  .chapter-title { font-size: 32px; font-weight: 800; color: #0d0d2a; line-height: 1.3; margin-bottom: 32px; }
+  .intro-block { border-left: 4px solid #fb923c; background: #fff8f5; padding: 20px 24px; border-radius: 0 10px 10px 0; margin-bottom: 28px; color: #4a2a1a; }
+  .section-title { font-size: 20px; font-weight: 700; color: #2a1a5e; margin: 28px 0 14px 0; padding-bottom: 8px; border-bottom: 2px solid #f0eeff; }
+  .section-content { color: #3a3a5a; line-height: 1.9; margin-bottom: 20px; }
+  .conseil-block { background: linear-gradient(135deg, #f0f8ff, #e8f4ff); border: 1px solid #00b4d844; border-radius: 12px; padding: 20px 24px; margin: 24px 0; }
+  .conseil-label { font-size: 12px; font-weight: 700; color: #0077aa; margin-bottom: 8px; }
+  .erreurs-block { background: #fff5f5; border: 1px solid #ffcccc; border-radius: 12px; padding: 20px 24px; margin: 24px 0; }
+  .erreurs-label { font-size: 12px; font-weight: 700; color: #cc3333; margin-bottom: 12px; }
+  .erreur-item { color: #553333; font-size: 13px; margin-bottom: 8px; padding-left: 8px; }
+  .exercice-block { background: linear-gradient(135deg, #f0fff5, #e8fff2); border: 2px solid #34d39944; border-radius: 12px; padding: 24px; margin: 24px 0; }
+  .exercice-label { font-size: 12px; font-weight: 700; color: #059669; margin-bottom: 8px; }
+  .exercice-titre { font-size: 18px; font-weight: 700; color: #064e3b; margin-bottom: 8px; }
+  .exercice-meta { font-size: 12px; color: #6b7280; margin-bottom: 16px; }
+  .etape { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 10px; }
+  .etape-num { min-width: 26px; height: 26px; border-radius: 50%; background: #34d399; color: white; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+  .resultat { margin-top: 14px; padding: 10px 14px; background: #d1fae5; border-radius: 8px; color: #065f46; font-size: 13px; }
+  .resume-block { background: #f8f7ff; border: 1px solid #a78bfa33; border-radius: 10px; padding: 20px 24px; margin: 24px 0; }
+  .resume-label { font-size: 12px; font-weight: 700; color: #7c3aed; margin-bottom: 8px; }
+  .transition { text-align: center; color: #9ca3af; font-style: italic; font-size: 13px; padding: 20px 0; border-top: 1px dashed #e5e7eb; margin-top: 20px; }
+  .conclusion { padding: 60px 80px; }
+  .conclusion h1 { font-size: 32px; font-weight: 800; color: #0d0d2a; margin-bottom: 32px; }
+  .action-item { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 14px; }
+  .action-week { min-width: 40px; height: 40px; border-radius: 8px; background: #34d399; color: white; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 11px; flex-shrink: 0; }
+  .page-break { page-break-after: always; }
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .page-break { page-break-after: always; }
+    .cover { page-break-after: always; }
+    .toc { page-break-after: always; }
+  }
+</style>
+</head>
+<body>
+
+<!-- COUVERTURE -->
+<div class="cover">
+  <div class="cover-label">Ebook Complet · Niveau Débutant</div>
+  <div class="cover-title">${plan?.titre_principal || "Mon Ebook"}</div>
+  <div class="cover-subtitle">${plan?.sous_titre || ""}</div>
+  <div class="cover-badge">📚 ${chapters.length} Chapitres · ${plan?.nb_pages_estimees || "80"}+ Pages · Exercices Pratiques</div>
+</div>
+
+<div class="page-break"></div>
+
+<!-- TABLE DES MATIÈRES -->
+<div class="toc">
+  <h2>Table des matières</h2>
+  <div class="toc-item"><div class="toc-num">📖</div><div class="toc-text">Introduction</div></div>
+  ${chapters.map(ch => `<div class="toc-item"><div class="toc-num">${ch.numero}</div><div class="toc-text">${ch.titre}</div></div>`).join("")}
+  <div class="toc-item"><div class="toc-num">🎯</div><div class="toc-text">Conclusion & Plan d'action 30 jours</div></div>
+</div>
+
+<div class="page-break"></div>
+
+<!-- INTRODUCTION -->
+<div class="chapter">
+  <div class="chapter-label">AVANT-PROPOS</div>
+  <h1 class="chapter-title">Introduction</h1>
+  ${introData ? Object.entries(introData).map(([k, v]) => `
+    <h2 class="section-title">${k.replace(/_/g, " ").toUpperCase()}</h2>
+    <p class="section-content">${v}</p>
+  `).join("") : ""}
+</div>
+
+<div class="page-break"></div>
+
+<!-- CHAPITRES -->
+${chapterHTML}
+
+<div class="page-break"></div>
+
+<!-- CONCLUSION -->
+<div class="conclusion">
+  <h1>Conclusion</h1>
+  ${conclusionData?.felicitations ? `<div class="conseil-block"><p>${conclusionData.felicitations}</p></div>` : ""}
+  ${conclusionData?.recapitulatif ? `<p class="section-content">${conclusionData.recapitulatif}</p>` : ""}
+  ${conclusionData?.plan_action_30_jours ? `
+    <h2 class="section-title" style="color:#059669">🗓️ Ton Plan d'Action 30 Jours</h2>
+    ${conclusionData.plan_action_30_jours.map((a, i) => `<div class="action-item"><div class="action-week">S${i+1}</div><div>${a}</div></div>`).join("")}
+  ` : ""}
+  ${conclusionData?.mot_de_fin ? `<div class="exercice-block" style="margin-top:32px"><p style="font-style:italic;color:#064e3b">${conclusionData.mot_de_fin}</p></div>` : ""}
+</div>
+
+<script>window.onload = () => window.print();</script>
+</body>
+</html>`;
+
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const win = window.open(url, "_blank");
+    if (!win) alert("Autorise les popups pour télécharger le PDF.");
+  };
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "#050508", zIndex: 200, display: "flex", flexDirection: "column" }}>
       {/* Topbar */}
@@ -616,9 +762,15 @@ const EbookViewer = ({ data, plan, onClose }) => {
             <div style={{ color: "#555", fontSize: 11 }}>{chapters.length} chapitres · Reader intégré</div>
           </div>
         </div>
-        <button onClick={onClose} style={{ background: "#1a1a2e", border: "none", color: "#888", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontSize: 12, fontFamily: "monospace" }}>
-          ✕ Fermer le reader
-        </button>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={downloadPDF}
+            style={{ background: "linear-gradient(135deg,#a78bfa,#7c3aed)", border: "none", color: "#fff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontSize: 12, fontFamily: "monospace", fontWeight: 700 }}>
+            ⬇️ Télécharger PDF
+          </button>
+          <button onClick={onClose} style={{ background: "#1a1a2e", border: "none", color: "#888", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontSize: 12, fontFamily: "monospace" }}>
+            ✕ Fermer
+          </button>
+        </div>
       </div>
 
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
