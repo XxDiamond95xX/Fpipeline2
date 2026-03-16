@@ -764,18 +764,19 @@ export default function App() {
   useEffect(() => { logsEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
   const addLog = (msg, color = "#555") => setLogs(prev => [...prev, { msg, color, time: new Date().toLocaleTimeString() }]);
 
-  const callOpenAI = async (agent, context) => {
+  // Appel OpenAI générique
+  const callOpenAI = async (systemPrompt, userPrompt, maxTokens = 2000) => {
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
       body: JSON.stringify({
         model: "gpt-4o",
-        max_tokens: agent.maxTokens || 4000,
+        max_tokens: maxTokens,
         temperature: 0.7,
         response_format: { type: "json_object" },
         messages: [
-          { role: "system", content: agent.systemPrompt },
-          { role: "user", content: `Niche/Sujet: "${niche}"\n${context ? `\nContexte des agents précédents (utilise-le pour que tout soit cohérent):\n${JSON.stringify(context, null, 2)}` : ""}\n\nGénère du contenu LONG, DÉTAILLÉ et PÉDAGOGIQUE. Réponds uniquement en JSON valide.` }
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt }
         ]
       })
     });
@@ -785,30 +786,131 @@ export default function App() {
     return JSON.parse(text.replace(/```json|```/g, "").trim());
   };
 
+  // Génère UN seul chapitre — évite le JSON trop long
+  const generateChapter = async (chapterPlan, context) => {
+    const systemPrompt = `Tu es un auteur expert en rédaction d'ebooks pédagogiques pour débutants complets. Style: chaleureux, concret, encourageant, jamais condescendant. Tutoie le lecteur.
+Réponds UNIQUEMENT en JSON valide, sans markdown, sans backticks:
+{
+  "numero": ${chapterPlan.numero},
+  "titre": "titre exact du chapitre",
+  "introduction_chapitre": "Introduction engageante du chapitre en 80 mots qui donne envie de lire la suite",
+  "sections": [
+    {
+      "titre_section": "Titre de la section",
+      "contenu": "Contenu COMPLET de la section: minimum 250 mots. Explications claires pour un débutant absolu. Analogies simples, exemples concrets du quotidien, étapes détaillées si besoin. Jamais de jargon sans explication."
+    }
+  ],
+  "encadre_conseil": "Conseil d'expert pratique et actionnable que les débutants ignorent souvent",
+  "erreurs_courantes": ["Erreur 1 avec explication comment l'éviter", "Erreur 2 avec solution", "Erreur 3 avec solution"],
+  "exercice_pratique": {
+    "titre": "Titre de l'exercice",
+    "objectif": "Ce que cet exercice t'apporte concrètement",
+    "etapes": ["Étape 1 très détaillée", "Étape 2 détaillée", "Étape 3 détaillée", "Étape 4 détaillée"],
+    "duree_estimee": "30 minutes",
+    "resultat_attendu": "Ce que tu auras accompli"
+  },
+  "resume_chapitre": "Points essentiels du chapitre en 4-5 points clés actionnables",
+  "transition": "Phrase de transition vers le prochain chapitre qui donne envie de continuer"
+}`;
+
+    const userPrompt = `Niche/Sujet de l'ebook: "${niche}"
+
+Chapitre à rédiger:
+- Numéro: ${chapterPlan.numero}
+- Titre: ${chapterPlan.titre}
+- Sous-titre: ${chapterPlan.sous_titre || ""}
+- Objectif pédagogique: ${chapterPlan.objectif_pedagogique}
+- Sections à couvrir: ${(chapterPlan.sections || []).join(", ")}
+- Exercice prévu: ${chapterPlan.exercice_pratique}
+
+Titre de l'ebook: "${context.plan?.titre_principal}"
+Public cible: ${context.research?.audience_cible || "débutants complets"}
+
+Rédige ce chapitre COMPLET avec un contenu riche, pédagogique et actionnable. Chaque section doit faire 250 mots minimum. Réponds uniquement en JSON valide.`;
+
+    return callOpenAI(systemPrompt, userPrompt, 2500);
+  };
+
   const runPipeline = async () => {
     if (!niche.trim() || !apiKey.trim()) return;
     setRunning(true); setAgentStatus({}); setAgentResults({}); setLogs([]); setShowGumroad(false); setTab("pipeline");
     addLog("🚀 Démarrage du pipeline ultra-complet...", "#fff");
     addLog(`📌 Niche : "${niche}"`, "#a78bfa");
-    addLog("⏱ Temps estimé : 4 à 7 minutes (contenu très détaillé)", "#3a3a5a");
+    addLog("⏱ Temps estimé : 6 à 10 minutes (chaque chapitre généré séparément)", "#3a3a5a");
     let context = {};
-    for (let i = 0; i < AGENTS.length; i++) {
-      const agent = AGENTS[i];
+
+    // Agents 0-1-3-4-5 : normaux (research, plan, marketing, cover, publish)
+    const normalAgents = AGENTS.filter(a => a.id !== "content");
+
+    for (const agent of normalAgents) {
       setAgentStatus(prev => ({ ...prev, [agent.id]: "running" }));
       addLog(`\n⚡ ${agent.icon} ${agent.name}...`, agent.color);
       try {
-        const result = await callOpenAI(agent, i > 0 ? context : null);
+        const userPrompt = `Niche/Sujet: "${niche}"\n${Object.keys(context).length > 0 ? `\nContexte:\n${JSON.stringify(context, null, 2)}` : ""}\n\nRéponds uniquement en JSON valide.`;
+        const result = await callOpenAI(agent.systemPrompt, userPrompt, agent.maxTokens || 2000);
         context[agent.id] = result;
         setAgentResults(prev => ({ ...prev, [agent.id]: result }));
         setAgentStatus(prev => ({ ...prev, [agent.id]: "done" }));
-        const nb = result.chapitres?.length;
-        const sections = result.chapitres?.reduce((acc, c) => acc + (c.sections?.length || 0), 0);
-        addLog(`  ✓ Terminé${nb ? ` — ${nb} chapitres, ${sections} sections rédigées` : ""}`, agent.color);
+        addLog(`  ✓ Terminé`, agent.color);
+
+        // Après le plan, générer le contenu chapitre par chapitre
+        if (agent.id === "plan") {
+          const contentAgent = AGENTS.find(a => a.id === "content");
+          setAgentStatus(prev => ({ ...prev, content: "running" }));
+          addLog(`\n⚡ ✍️ Agent Contenu — génération chapitre par chapitre...`, "#fb923c");
+
+          const chapitres = result.chapitres || [];
+          const chapitresRediges = [];
+
+          // Introduction
+          addLog(`  📝 Rédaction introduction...`, "#fb923c");
+          const introResult = await callOpenAI(
+            `Tu es un auteur expert en ebooks pédagogiques. Réponds UNIQUEMENT en JSON valide:
+{"accroche":"80 mots qui parlent directement au lecteur de sa situation et frustration","histoire_auteur":"Histoire courte et authentique qui crédibilise l'auteur (100 mots)","ce_que_tu_vas_apprendre":"Description détaillée de la transformation que va vivre le lecteur (100 mots)","comment_utiliser_ce_livre":"Guide pratique pour tirer le maximum de cet ebook (80 mots)","mot_dencouragement":"Message personnel et motivant au lecteur (60 mots)"}`,
+            `Ebook: "${context.plan?.titre_principal}" sur la niche: "${niche}". Public: ${context.research?.audience_cible || "débutants"}. Rédige une introduction complète et engageante.`,
+            1200
+          );
+
+          // Chapitres un par un
+          for (let ci = 0; ci < chapitres.length; ci++) {
+            const ch = chapitres[ci];
+            addLog(`  📝 Chapitre ${ch.numero}/${chapitres.length} : ${ch.titre?.slice(0, 40)}...`, "#fb923c");
+            try {
+              const chResult = await generateChapter(ch, context);
+              chapitresRediges.push(chResult);
+              addLog(`     ✓ Chapitre ${ch.numero} rédigé (${(chResult.sections || []).length} sections)`, "#fb923c");
+            } catch (e) {
+              addLog(`     ✗ Erreur chapitre ${ch.numero}: ${e.message}`, "#ef4444");
+            }
+          }
+
+          // Conclusion
+          addLog(`  📝 Rédaction conclusion...`, "#fb923c");
+          const conclusionResult = await callOpenAI(
+            `Tu es un auteur expert. Réponds UNIQUEMENT en JSON valide:
+{"felicitations":"Message chaleureux de félicitations (80 mots)","recapitulatif":"Récapitulatif complet de tout ce que le lecteur a appris (150 mots)","plan_action_30_jours":["Action semaine 1","Action semaine 2","Action semaine 3","Action semaine 4"],"ressources_complementaires":["Ressource gratuite 1","Ressource 2","Ressource 3"],"mot_de_fin":"Message personnel et inspirant (100 mots)"}`,
+            `Ebook terminé: "${context.plan?.titre_principal}" sur "${niche}". Rédige une conclusion complète et motivante.`,
+            1000
+          );
+
+          const contentFinal = {
+            introduction: introResult,
+            chapitres: chapitresRediges,
+            conclusion: conclusionResult
+          };
+
+          context.content = contentFinal;
+          setAgentResults(prev => ({ ...prev, content: contentFinal }));
+          setAgentStatus(prev => ({ ...prev, content: "done" }));
+          addLog(`  ✓ Ebook complet — ${chapitresRediges.length} chapitres rédigés`, "#fb923c");
+        }
+
       } catch (e) {
         setAgentStatus(prev => ({ ...prev, [agent.id]: "error" }));
         addLog(`  ✗ Erreur: ${e.message}`, "#ef4444");
       }
     }
+
     setShowGumroad(true);
     addLog("\n🎉 Ebook complet généré ! Explore les livrables ci-dessous.", "#00ffd5");
     setRunning(false);
