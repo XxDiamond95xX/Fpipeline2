@@ -251,7 +251,7 @@ const GumroadPanel = ({ results, gumroadToken, setGumroadToken }) => {
       body.append("description", pub?.gumroad_description || "");
       body.append("published", "false");
       if (pub?.tags) pub.tags.forEach(t => body.append("tags[]", t));
-      const res = await fetch("https://api.gumroad.com/v2/products", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body.toString() });
+      const res = await fetch("https://corsproxy.io/?url=https://api.gumroad.com/v2/products", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body.toString() });
       const data = await res.json();
       if (data.success) { setProductUrl(data.product?.short_url || `https://app.gumroad.com/products/${data.product?.id}`); setStatus("success"); }
       else { setError(data.message || "Erreur Gumroad"); setStatus("error"); }
